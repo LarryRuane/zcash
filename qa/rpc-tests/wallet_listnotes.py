@@ -20,62 +20,81 @@ class WalletListNotes(BitcoinTestFramework):
 
     def run_test(self):
         # Current height = 200 -> Sprout
+        print self.nodes[0].getblockcount()
+        assert_equal(200, self.nodes[0].getblockcount())
         sproutzaddr = self.nodes[0].z_getnewaddress('sprout')
         saplingzaddr = self.nodes[0].z_getnewaddress('sapling')
         print "sprout zaddr", sproutzaddr
         print "saplingzaddr", saplingzaddr
+        assert_equal(0, Decimal(self.nodes[0].z_gettotalbalance()['private']))
         
-        # Current height = 201 -> Sprout
+        # Set current height to 201 -> Sprout
         self.nodes[0].generate(1)
         self.sync_all()
-        
+        assert_equal(201, self.nodes[0].getblockcount())
+
         mining_addr = self.nodes[0].listunspent()[0]['address']
-        # Shield coinbase funds 
-        recipients = []
-        recipients.append({"address":sproutzaddr, "amount":Decimal('10.0')-Decimal('0.0001')}) # utxo amount less fee
+        # Shield coinbase funds
+        recipients = [{"address":sproutzaddr, "amount":Decimal('10.0')-Decimal('0.0001')}] # utxo amount less fee
         myopid = self.nodes[0].z_sendmany(mining_addr, recipients)
         txid_1 = wait_and_assert_operationid_status(self.nodes[0], myopid)
-        
-        # No funds in sproutzaddr yet
-        assert_equal(set(self.nodes[0].z_listunspent()), set())
-        
-        print self.nodes[0].z_gettotalbalance() # no private balance displayed bc no confirmations yet
-        
-        # list unspent, allowing 0 confirmations
-        unspent_cb = self.nodes[0].z_listunspent(0)
-        # list unspent, filtering by address
-        unspent_cb_filter = self.nodes[0].z_listunspent(0, 9999, False, [sproutzaddr]) 
-        assert_equal(unspent_cb, unspent_cb_filter)
-        assert_equal(len(unspent_cb), 1)
-        assert_equal(unspent_cb[0]['change'], False)
-        assert_equal(unspent_cb[0]['txid'], txid_1)
-        assert_equal(unspent_cb[0]['spendable'], True)
-        assert_equal(unspent_cb[0]['address'], sproutzaddr)
-        assert_equal(unspent_cb[0]['amount'], Decimal('10.0')-Decimal('0.0001'))
-        
-        # Generate a block to confirm shield coinbase tx        
-        # Current height = 202 -> Overwinter. Default address type is Sprout
-        self.nodes[0].generate(1)
         self.sync_all()
         
-        sproutzaddr2 = self.nodes[0].z_getnewaddress('sprout')
+        # No funds (with one or more confirmations) in sproutzaddr yet
+        assert(not self.nodes[0].z_listunspent())
+        
+        # no private balance because no confirmations yet
+        print "type", type(self.nodes[0].z_gettotalbalance()['private'])
+        assert_equal(0, Decimal(self.nodes[0].z_gettotalbalance()['private']))
+        
+        # list private unspent, this time allowing 0 confirmations
+        unspent_cb = self.nodes[0].z_listunspent(0)
+        assert_equal(1, len(unspent_cb))
+        assert_equal(False,                             unspent_cb[0]['change'])
+        assert_equal(txid_1,                            unspent_cb[0]['txid'])
+        assert_equal(True,                              unspent_cb[0]['spendable'])
+        assert_equal(sproutzaddr,                       unspent_cb[0]['address'])
+        assert_equal(Decimal('10.0')-Decimal('0.0001'), unspent_cb[0]['amount'])
+
+        # list unspent, filtering by address, should produce same result
+        unspent_cb_filter = self.nodes[0].z_listunspent(0, 9999, False, [sproutzaddr])
+        assert_equal(unspent_cb, unspent_cb_filter)
+        
+        # Generate a block to confirm shield coinbase tx
+        self.nodes[0].generate(1)
+        self.sync_all()
+        assert_equal(202, self.nodes[0].getblockcount())
+        
+        # Current height = 202 -> Overwinter. Default address type remains Sprout
+        sproutzaddr2 = self.nodes[0].z_getnewaddress()
+        assert_equal('sprout', self.nodes[0].z_validateaddress(sproutzaddr2)['type'])
         recipients = [{"address": sproutzaddr2, "amount":Decimal('1.0')-Decimal('0.0001')}]
         myopid = self.nodes[0].z_sendmany(sproutzaddr, recipients)
         txid_2 = wait_and_assert_operationid_status(self.nodes[0], myopid)
+        self.sync_all()
         
         # list unspent, allowing 0conf txs
         unspent_tx = self.nodes[0].z_listunspent(0)
-        unspent_tx_filter = self.nodes[0].z_listunspent(0, 9999, False, [sproutzaddr2]) 
+        print "unspent_tx1:", unspent_tx
+        unspent_tx_filter = self.nodes[0].z_listunspent(0, 9999, False, [sproutzaddr2])
         assert_equal(len(unspent_tx), 2)
-        assert_equal(unspent_tx[0]['change'], False)
-        assert_equal(unspent_tx[0]['txid'], txid_2)
-        assert_equal(unspent_tx[0]['spendable'], True)
-        assert_equal(unspent_tx[0]['address'], sproutzaddr2)
-        assert_equal(unspent_tx[0]['amount'], Decimal('1.0')-Decimal('0.0001'))
+        unspent_tx = sorted(unspent_tx, key=lambda k: k['amount'])
+        print "unspent_tx2:", unspent_tx
+        assert_equal(False,                             unspent_tx[0]['change'])
+        assert_equal(txid_2,                            unspent_tx[0]['txid'])
+        assert_equal(True,                              unspent_tx[0]['spendable'])
+        assert_equal(sproutzaddr2,                      unspent_tx[0]['address'])
+        assert_equal(Decimal('1.0')-Decimal('0.0001'),  unspent_tx[0]['amount'])
+
+        assert_equal(True,                              unspent_tx[1]['change'])
+        assert_equal(txid_2,                            unspent_tx[1]['txid'])
+        assert_equal(True,                              unspent_tx[1]['spendable'])
+        assert_equal(sproutzaddr,                       unspent_tx[1]['address'])
+        assert_equal(Decimal('9.0')-Decimal('0.0001'),  unspent_tx[1]['amount'])
         # TODO: test change
         
         # No funds in saplingzaddr yet
-        assert_equal(set(self.nodes[0].z_listunspent(0, 9999, False, [saplingzaddr])), set())
+        assert(not self.nodes[0].z_listunspent(0, 9999, False, [saplingzaddr]))
         
         # Current height = 204 -> Sapling
         # self.nodes[0].generate(2)
