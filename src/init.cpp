@@ -1412,6 +1412,20 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
                 delete pblocktree;
 
                 pblocktree = new CBlockTreeDB(nBlockTreeDBCache, false, fReindex);
+
+                // Convert the blocks/rev*.dat files if needed (give the undo entries
+                // a version number) by forcing a reindex, which recreates them. But
+                // no need to do this if the data directory is empty (initial state).
+                if (fs::exists(GetBlockPosFilename(CDiskBlockPos(0, 0), "blk"))) {
+                    bool fConvertRev = false;
+                    pblocktree->ReadFlag("revconverted", fConvertRev);
+                    if (!fConvertRev) {
+                        LogPrintf("Converting block/rev files (reindexing)\n");
+                        fReindex = true;
+                        delete pblocktree;
+                        pblocktree = new CBlockTreeDB(nBlockTreeDBCache, false, fReindex);
+                    }
+                }
                 pcoinsdbview = new CCoinsViewDB(nCoinDBCache, false, fReindex);
                 pcoinscatcher = new CCoinsViewErrorCatcher(pcoinsdbview);
                 pcoinsTip = new CCoinsViewCache(pcoinscatcher);
@@ -1422,6 +1436,7 @@ bool AppInit2(boost::thread_group& threadGroup, CScheduler& scheduler)
                     if (fPruneMode)
                         CleanupBlockRevFiles();
                 }
+                pblocktree->WriteFlag("revconverted", true);
 
                 if (!LoadBlockIndex()) {
                     strLoadError = _("Error loading block database");

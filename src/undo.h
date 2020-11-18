@@ -66,14 +66,20 @@ public:
 class CBlockUndo
 {
 public:
+    uint8_t version;
     std::vector<CTxUndo> vtxundo; // for all but the coinbase
+    std::vector<uint8_t> vtzeundo;// temporary stand-in for real tze undo entries
     uint256 old_sprout_tree_root;
+
+    CBlockUndo() : version(1) {}
 
     ADD_SERIALIZE_METHODS;
 
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action) {
+        READWRITE(version);
         READWRITE(vtxundo);
+        READWRITE(vtzeundo);
         READWRITE(old_sprout_tree_root);
     }
 };
